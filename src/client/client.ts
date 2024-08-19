@@ -1,3 +1,4 @@
+
 const exp = (<any>global).exports;
 
 RegisterNuiCallbackType('screenshot_created');
@@ -9,13 +10,9 @@ class ResultData {
 const results: {[id: string]: ResultData} = {};
 let correlationId = 0;
 
-function registerCorrelation(cb: (result: string) => void) {
-    const id = correlationId.toString();
-
+function registerCorrelation(cb: (result: string) => void): string {
+    const id = (correlationId++).toString();
     results[id] = { cb };
-
-    correlationId++;
-
     return id;
 }
 
@@ -23,58 +20,37 @@ on('__cfx_nui:screenshot_created', (body: any, cb: (arg: any) => void) => {
     cb(true);
 
     if (body.id !== undefined && results[body.id]) {
-        results[body.id].cb(body.data);
+        const screenshotData = results[body.id].cb(body.data);
         delete results[body.id];
+
+        // Send the screenshot to Discord webhook
+        sendToDiscordWebhook(screenshotData);
     }
 });
 
-exp('requestScreenshot', (options: any, cb: (result: string) => void) => {
-    const realOptions = (cb !== undefined) ? options : {
-        encoding: 'jpg'
+function takeScreenshot(): Promise<string> {
+    return new Promise((resolve) => {
+        const id = registerCorrelation(resolve);
+        SendNuiMessage(JSON.stringify({ type: 'screenshot', id }));
+    });
+}
+
+function sendToDiscordWebhook(screenshotData: string) {
+    const request = new XMLHttpRequest();
+    request.open("POST", "YOUR_DISCORD_WEBHOOK_URL_HERE");
+    request.setRequestHeader('Content-type', 'application/json');
+
+    const params = {
+        content: "Screenshot captured",
+        embeds: [{
+            image: {
+                url: `data:image/png;base64,${screenshotData}`
+            }
+        }]
     };
 
-    const realCb = (cb !== undefined) ? cb : options;
+    request.send(JSON.stringify(params));
+}
 
-    realOptions.resultURL = null;
-    realOptions.targetField = null;
-    realOptions.targetURL = `http://${GetCurrentResourceName()}/screenshot_created`;
-    
-    realOptions.correlation = registerCorrelation(realCb);
-
-    SendNuiMessage(JSON.stringify({
-        request: realOptions
-    }));
-});
-
-exp('requestScreenshotUpload', (url: string, field: string, options: any, cb: (result: string) => void) => {
-    const realOptions = (cb !== undefined) ? options : {
-        headers: {},
-        encoding: 'jpg'
-    };
-
-    const realCb = (cb !== undefined) ? cb : options;
-
-    realOptions.targetURL = url;
-    realOptions.targetField = field;
-    realOptions.resultURL = `http://${GetCurrentResourceName()}/screenshot_created`;
-    
-    realOptions.correlation = registerCorrelation(realCb);
-
-    SendNuiMessage(JSON.stringify({
-        request: realOptions
-    }));
-});
-
-onNet('screenshot_basic:requestScreenshot', (options: any, url: string) => {
-    options.encoding = options.encoding || 'jpg';
-
-    options.targetURL = `http://${GetCurrentServerEndpoint()}${url}`;
-    options.targetField = 'file';
-    options.resultURL = null;
-
-    options.correlation = registerCorrelation(() => {});
-
-    SendNuiMessage(JSON.stringify({
-        request: options
-    }));
-});
+// Example usage:
+// takeScreenshot().then((data) => console.log('Screenshot data:', data));
